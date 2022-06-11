@@ -6,7 +6,7 @@ import ast
 import enum
 import sys
 import tokenize
-from typing import ClassVar, Iterator, Tuple, Type, cast
+from typing import ClassVar, Iterator, List, Optional, Tuple, Type
 
 from flake8.options.manager import OptionManager
 
@@ -37,7 +37,9 @@ ASTResult = Tuple[int, int, str, Type]  # (line, column, text, Type)
 class Message(enum.Enum):
 	"""Messages."""
 
-	UNQUOTE_TYPE = (1, "Remove quotes from type annotation '{value}'")
+	ASSIGN_TYPE = (1, "Remove quotes from variable type annotation '{value}'")
+	ARG_TYPE = (2, "Remove quotes from argument type annotation '{value}'")
+	RETURN_TYPE = (3, "Remove quotes from return type annotation '{value}'")
 
 	@property
 	def code(self) -> str:
@@ -89,6 +91,67 @@ class Checker:
 		return (node.lineno, node.col_offset, f'{message.code}{self.plugin_name} {message.text(**kwargs)}', type(self))
 
 
+class ImportVisitor(ast.NodeVisitor):
+	"""Import visitor."""
+
+	enabled: bool
+
+	def __init__(self) -> None:
+		self.enabled = False
+
+	def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+		if (self.enabled or ('__future__' != node.module)):
+			return
+
+		for alias in node.names:
+			if ('annotations' == alias.name):
+				self.enabled = True
+				return
+
+
+class AnnotationVisitor(ast.NodeVisitor):
+	"""Annotation visitor."""
+
+	results: List[Tuple[ast.AST, Message, str]]
+
+	def __init__(self) -> None:
+		self.results = []
+
+	def _check_annotation(self, annotation: Optional[ast.AST], message: Message) -> Iterator[Tuple[ast.AST, Message, str]]:
+		if (isinstance(annotation, ast.Constant)):
+			if (annotation.value is None):
+				return
+			yield (annotation, message, annotation.value)
+		elif (isinstance(annotation, ast.Subscript)):
+			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+
+			if (isinstance(value, ast.Tuple)):
+				for item in value.elts:
+					for result in self._check_annotation(item, message):
+						yield result
+			else:
+				for result in self._check_annotation(value, message):
+					yield result
+		else:
+			try:
+				if (isinstance(annotation, ast.Str)):  # python3.7
+					if (annotation.s is None):
+						return
+					yield (annotation, message, annotation.s)
+			except AttributeError:
+				pass
+
+	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+		self.results.extend(self._check_annotation(node.annotation, Message.ASSIGN_TYPE))
+
+	def visit_arg(self, node: ast.arg) -> None:
+		self.results.extend(self._check_annotation(node.annotation, Message.ARG_TYPE))
+
+	def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+		self.generic_visit(node)
+		self.results.extend(self._check_annotation(node.returns, Message.RETURN_TYPE))
+
+
 class AnnotationChecker(Checker):
 	"""Annotation checker."""
 
@@ -99,61 +162,18 @@ class AnnotationChecker(Checker):
 		self.tree = tree
 		self.enabled = ('always' == self.activation)
 
-	def _check_annotation(self, annotation: ast.AST) -> Iterator[ASTResult]:
-		if (isinstance(annotation, ast.Constant)):
-			if (annotation.value is None):
-				return
-			yield self._ast_node_message(annotation, Message.UNQUOTE_TYPE, value=annotation.value)
-		elif (isinstance(annotation, ast.Subscript)):
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
-
-			if (isinstance(value, ast.Tuple)):
-				for item in value.elts:
-					for result in self._check_annotation(item):
-						yield result
-			else:
-				for result in self._check_annotation(value):
-					yield result
-		else:
-			try:
-				if (isinstance(annotation, ast.Str)):  # python3.7
-					if (annotation.s is None):
-						return
-					yield self._ast_node_message(annotation, Message.UNQUOTE_TYPE, value=annotation.s)
-			except AttributeError:
-				pass
-
 	def __iter__(self) -> Iterator[ASTResult]:
 		"""Primary call from flake8, yield error messages."""
 		if ((not self.enabled) and ('never' != self.activation)):
-
-			class ImportVisitor(ast.NodeVisitor):
-				def __init__(self) -> None:
-					self.enabled = False
-
-				def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
-					if (self.enabled or ('__future__' != node.module)):
-						return
-
-					for alias in node.names:
-						if ('annotations' == alias.name):
-							self.enabled = True
-							return
-
-			enable_visitor = ImportVisitor()
-			enable_visitor.visit(self.tree)
-			self.enabled = enable_visitor.enabled
+			import_visitor = ImportVisitor()
+			import_visitor.visit(self.tree)
+			self.enabled = import_visitor.enabled
 
 		if (not self.enabled):
 			return
 
-		for node in ast.walk(self.tree):
-			if (hasattr(node, 'annotation')):
-				annotation = cast(ast.arg, node).annotation
-			elif (isinstance(node, ast.FunctionDef)):
-				annotation = node.returns
-			else:
-				continue
+		annotation_visitor = AnnotationVisitor()
+		annotation_visitor.visit(self.tree)
 
-			for result in self._check_annotation(cast(ast.AST, annotation)):
-				yield result
+		for node, message, value in annotation_visitor.results:
+			yield self._ast_node_message(node, message, value=value)
