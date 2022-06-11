@@ -127,11 +127,9 @@ class AnnotationVisitor(ast.NodeVisitor):
 
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
-					for result in self._check_annotation(item, message):
-						yield result
+					yield from self._check_annotation(item, message)
 			else:
-				for result in self._check_annotation(value, message):
-					yield result
+				yield from self._check_annotation(value, message)
 		else:
 			try:
 				if (isinstance(annotation, ast.Str)):  # python3.7
