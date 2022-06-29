@@ -5,20 +5,24 @@ from __future__ import annotations
 import ast
 import enum
 import sys
-import tokenize
-from typing import ClassVar, Iterator, List, Optional, Tuple, Type
-
-from flake8.options.manager import OptionManager
+from typing import ClassVar, Iterator, List, Optional, TYPE_CHECKING, Tuple, Type
 
 import flake8_postponed_annotations
 
 from typing_extensions import Protocol
 
+if (TYPE_CHECKING):
+	import tokenize
+	from flake8.options.manager import OptionManager
+
 
 try:
-	import pkg_resources
-	package_version = pkg_resources.get_distribution(__package__).version
-except pkg_resources.DistributionNotFound:
+	try:
+		from importlib.metadata import version
+	except ModuleNotFoundError:  # python < 3.8 use polyfill
+		from importlib_metadata import version  # type: ignore
+	package_version = version(__package__)
+except Exception:
 	package_version = 'unknown'
 
 
