@@ -42,15 +42,15 @@ or can be placed in your flake8 config file.
 
 | Code   | Message |
 |--------|---------|
-| PEA001 | Remove quotes from variable type annotation 'type'
-| PEA002 | Remove quotes from argument type annotation 'type'
-| PEA003 | Remove quotes from return type annotation 'type'
+| PAE001 | Remove quotes from variable type annotation 'type'
+| PAE002 | Remove quotes from argument type annotation 'type'
+| PAE003 | Remove quotes from return type annotation 'type'
 
 
 ## Examples
 
 ```
-x: 'Foo'  <-- PEA001
-def foo(x: 'Foo') -> None:  <-- PEA002
-def foo(x: Foo) -> 'Bar':  <-- PEA003
+x: 'Foo'  <-- PAE001
+def foo(x: 'Foo') -> None:  <-- PAE002
+def foo(x: Foo) -> 'Bar':  <-- PAE003
 ```
