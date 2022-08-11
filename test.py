@@ -69,6 +69,33 @@ class TestAnnotations(unittest.TestCase):
 			"1:30: MDA003 Remove quotes from return type annotation 'None'",
 		])
 
+	def test_typing_literal(self) -> None:
+		options = ['postponed=always']
+		self.assertEqual(flake8("import typing\ndef func() -> typing.Literal[False]:\n    pass", options), [
+		])
+		self.assertEqual(flake8("import typing as typ\ndef func() -> typ.Literal[False]:\n    pass", options), [
+		])
+		self.assertEqual(flake8("from typing import Literal\ndef func() -> Literal['False']:\n    pass", options), [
+		])
+		self.assertEqual(flake8("from typing import Literal as Lit\ndef func() -> Lit[False]:\n    pass", options), [
+		])
+
+	def test_typing_extensions_literal(self) -> None:
+		options = ['postponed=always']
+		self.assertEqual(flake8("import typing_extensions\ndef func() -> typing_extensions.Literal[False]:\n    pass", options), [
+		])
+		self.assertEqual(flake8("import typing_extensions as typ\ndef func() -> typ.Literal[False]:\n    pass", options), [
+		])
+		self.assertEqual(flake8("from typing_extensions import Literal\ndef func() -> Literal['False']:\n    pass", options), [
+		])
+		self.assertEqual(flake8("from typing_extensions import Literal as Lit\ndef func() -> Lit[False]:\n    pass", options), [
+		])
+
+	def test_callable(self) -> None:
+		options = ['postponed=always']
+		self.assertEqual(flake8("from typing import Callable\ndef func(x: Callable[..., None]) -> None:\n    pass", options), [
+		])
+
 
 class TestOptions(unittest.TestCase):
 	"""Test options."""

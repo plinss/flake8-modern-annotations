@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import enum
 import sys
-from typing import ClassVar, Iterator, List, Optional, TYPE_CHECKING, Tuple, Type
+from typing import ClassVar, Optional, TYPE_CHECKING, Tuple, Type
 
 import flake8_modern_annotations
 
@@ -13,6 +13,7 @@ from typing_extensions import Protocol
 
 if (TYPE_CHECKING):
 	import tokenize
+	from collections.abc import Iterator, Mapping
 	from flake8.options.manager import OptionManager
 
 
@@ -41,9 +42,9 @@ ASTResult = Tuple[int, int, str, Type]  # (line, column, text, Type)
 class Message(enum.Enum):
 	"""Messages."""
 
-	ASSIGN_TYPE = (1, "Remove quotes from variable type annotation '{value}'")
-	ARG_TYPE = (2, "Remove quotes from argument type annotation '{value}'")
-	RETURN_TYPE = (3, "Remove quotes from return type annotation '{value}'")
+	POSTPONED_ASSIGN_TYPE = (1, "Remove quotes from variable type annotation '{value}'")
+	POSTPONED_ARG_TYPE = (2, "Remove quotes from argument type annotation '{value}'")
+	POSTPONED_RETURN_TYPE = (3, "Remove quotes from return type annotation '{value}'")
 
 	@property
 	def code(self) -> str:
@@ -59,7 +60,7 @@ class Checker:
 	name: ClassVar[str] = __package__.replace('_', '-')
 	version: ClassVar[str] = package_version
 	plugin_name: ClassVar[str]
-	postponed: ClassVar[str] = 'auto'
+	postponed_option: ClassVar[str] = 'auto'
 
 	@classmethod
 	def add_options(cls, option_manager: OptionManager) -> None:
@@ -78,9 +79,9 @@ class Checker:
 	def parse_options(cls, options: Options) -> None:
 		cls.plugin_name = (' (' + cls.name + ')') if (options.modern_annotations_include_name) else ''
 		if ((sys.version_info.major == 3) and (sys.version_info.minor < 7)):
-			cls.postponed = 'never'
+			cls.postponed_option = 'never'
 		else:
-			cls.postponed = options.modern_annotations_postponed
+			cls.postponed_option = options.modern_annotations_postponed
 
 	def _logical_token_message(self, token: tokenize.TokenInfo, message: Message, **kwargs) -> LogicalResult:
 		return (token.start, f'{message.code}{self.plugin_name} {message.text(**kwargs)}')
@@ -95,8 +96,8 @@ class Checker:
 		return (node.lineno, node.col_offset, f'{message.code}{self.plugin_name} {message.text(**kwargs)}', type(self))
 
 
-class ImportVisitor(ast.NodeVisitor):
-	"""Import visitor."""
+class FutureVisitor(ast.NodeVisitor):
+	"""Future import visitor."""
 
 	enabled: bool
 
@@ -113,22 +114,104 @@ class ImportVisitor(ast.NodeVisitor):
 				return
 
 
-class AnnotationVisitor(ast.NodeVisitor):
-	"""Annotation visitor."""
+TYPING_TYPES = {
+	'Tuple',
+	'List',
+	'Dict',
+	'Set',
+	'FrozenSet',
+	'Type',
+	'Deque',
+	'DefaultDict',
+	'OrderedDict',
+	'Counter',
+	'ChainMap',
+	'Awaitable',
+	'Coroutine',
+	'AsyncIterable',
+	'AsyncIterator',
+	'AsyncGenerator',
+	'Iterable',
+	'Iterator',
+	'Generator',
+	'Reversible',
+	'Container',
+	'Collection',
+	'Callable',
+	'AbstractSet',
+	'MutableSet',
+	'Mapping',
+	'MutableMapping',
+	'Sequence',
+	'MutableSequence',
+	'ByteString',
+	'MappingView',
+	'KeysView',
+	'ItemsView',
+	'ValuesView',
+	'ContextManager',
+	'AsyncContextManager',
+	'Pattern',
+	'Match',
+	'Literal',
+}
 
-	results: List[Tuple[ast.AST, Message, str]]
+
+class ImportVisitor(ast.NodeVisitor):
+	"""Import visitor."""
+
+	type_map: dict[str, str]
 
 	def __init__(self) -> None:
+		self.type_map = {}
+
+	def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+		for alias in node.names:
+			if ('typing' == alias.name):
+				import_name = (alias.asname or alias.name)
+				for type_name in TYPING_TYPES:
+					self.type_map[f'{import_name}.{type_name}'] = type_name
+			elif ('typing_extensions' == alias.name):
+				import_name = (alias.asname or alias.name)
+				self.type_map[f'{import_name}.Literal'] = 'Literal'
+
+	def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+		if ('typing' == node.module):
+			for alias in node.names:
+				self.type_map[alias.asname or alias.name] = alias.name
+		elif ('typing_extensions' == node.module):
+			for alias in node.names:
+				if ('Literal' == alias.name):
+					self.type_map[alias.asname or alias.name] = alias.name
+
+
+class PostponedAnnotationVisitor(ast.NodeVisitor):
+	"""Postponed annotation visitor."""
+
+	type_map: Mapping[str, str]
+	results: list[tuple[ast.AST, Message, str]]
+
+	def __init__(self, type_map: Mapping[str, str]) -> None:
+		self.type_map = type_map
 		self.results = []
 
-	def _check_annotation(self, annotation: Optional[ast.AST], message: Message) -> Iterator[Tuple[ast.AST, Message, str]]:
+	def _check_annotation(self, annotation: Optional[ast.AST], message: Message) -> Iterator[tuple[ast.AST, Message, str]]:
 		if (isinstance(annotation, ast.Constant)):
-			if (annotation.value is None):
+			if ((annotation.value is None) or isinstance(annotation.value, type(Ellipsis))):
 				return
 			yield (annotation, message, annotation.value)
 		elif (isinstance(annotation, ast.Subscript)):
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			# skip Literal[]
+			if (isinstance(annotation.value, ast.Name)):
+				if ('Literal' == self.type_map.get(annotation.value.id)):
+					return
+			if (isinstance(annotation.value, ast.Attribute) and isinstance(annotation.value.value, ast.Name)):
+				attribute = annotation.value
+				type_name = f'{attribute.value.id}.{attribute.attr}'  # type: ignore
+				if ('Literal' == self.type_map.get(type_name)):
+					return
 
+			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_annotation(item, message)
@@ -144,38 +227,42 @@ class AnnotationVisitor(ast.NodeVisitor):
 				pass
 
 	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
-		self.results.extend(self._check_annotation(node.annotation, Message.ASSIGN_TYPE))
+		self.results.extend(self._check_annotation(node.annotation, Message.POSTPONED_ASSIGN_TYPE))
 
 	def visit_arg(self, node: ast.arg) -> None:
-		self.results.extend(self._check_annotation(node.annotation, Message.ARG_TYPE))
+		self.results.extend(self._check_annotation(node.annotation, Message.POSTPONED_ARG_TYPE))
 
 	def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
 		self.generic_visit(node)
-		self.results.extend(self._check_annotation(node.returns, Message.RETURN_TYPE))
+		self.results.extend(self._check_annotation(node.returns, Message.POSTPONED_RETURN_TYPE))
 
 
 class AnnotationChecker(Checker):
 	"""Annotation checker."""
 
 	tree: ast.AST
-	enabled: bool
+	postponed: bool
 
 	def __init__(self, tree: ast.AST) -> None:
 		self.tree = tree
-		self.enabled = ('always' == self.postponed)
+		self.postponed = ('always' == self.postponed_option)
 
 	def __iter__(self) -> Iterator[ASTResult]:
 		"""Primary call from flake8, yield error messages."""
-		if ((not self.enabled) and ('never' != self.postponed)):
-			import_visitor = ImportVisitor()
-			import_visitor.visit(self.tree)
-			self.enabled = import_visitor.enabled
+		if ((not self.postponed) and ('never' != self.postponed_option)):
+			future_visitor = FutureVisitor()
+			future_visitor.visit(self.tree)
+			self.postponed = future_visitor.enabled
 
-		if (not self.enabled):
+		if (not (self.postponed)):
 			return
 
-		annotation_visitor = AnnotationVisitor()
-		annotation_visitor.visit(self.tree)
+		import_visitor = ImportVisitor()
+		import_visitor.visit(self.tree)
 
-		for node, message, value in annotation_visitor.results:
-			yield self._ast_node_message(node, message, value=value)
+		if (self.postponed):
+			postponed_visitor = PostponedAnnotationVisitor(import_visitor.type_map)
+			postponed_visitor.visit(self.tree)
+
+			for node, message, value in postponed_visitor.results:
+				yield self._ast_node_message(node, message, value=value)
