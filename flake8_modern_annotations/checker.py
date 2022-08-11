@@ -7,7 +7,7 @@ import enum
 import sys
 from typing import ClassVar, Iterator, List, Optional, TYPE_CHECKING, Tuple, Type
 
-import flake8_postponed_annotations
+import flake8_modern_annotations
 
 from typing_extensions import Protocol
 
@@ -29,8 +29,8 @@ except Exception:
 class Options(Protocol):
 	"""Protocol for options."""
 
-	postponed_annotations_activation: str
-	postponed_annotations_include_name: bool
+	modern_annotations_postponed: str
+	modern_annotations_include_name: bool
 
 
 LogicalResult = Tuple[Tuple[int, int], str]  # (line, column), text
@@ -47,7 +47,7 @@ class Message(enum.Enum):
 
 	@property
 	def code(self) -> str:
-		return (flake8_postponed_annotations.plugin_prefix + str(self.value[0]).rjust(6 - len(flake8_postponed_annotations.plugin_prefix), '0'))
+		return (flake8_modern_annotations.plugin_prefix + str(self.value[0]).rjust(6 - len(flake8_modern_annotations.plugin_prefix), '0'))
 
 	def text(self, **kwargs) -> str:
 		return self.value[1].format(**kwargs)
@@ -59,28 +59,28 @@ class Checker:
 	name: ClassVar[str] = __package__.replace('_', '-')
 	version: ClassVar[str] = package_version
 	plugin_name: ClassVar[str]
-	activation: ClassVar[str] = 'auto'
+	postponed: ClassVar[str] = 'auto'
 
 	@classmethod
 	def add_options(cls, option_manager: OptionManager) -> None:
-		option_manager.add_option('--postponed-annotations-activation', default='auto',
+		option_manager.add_option('--modern-annotations-postponed', default='auto',
 		                          action='store', parse_from_config=True,
-		                          choices=('auto', 'always', 'never'), dest='postponed_annotations_activation',
+		                          choices=('auto', 'always', 'never'), dest='modern_annotations_postponed',
 		                          help="Activate plugin, auto checks for 'from __future__ import annotations' (default: auto)")
-		option_manager.add_option('--postponed-annotations-include-name', default=False, action='store_true',
-		                          parse_from_config=True, dest='postponed_annotations_include_name',
+		option_manager.add_option('--modern-annotations-include-name', default=False, action='store_true',
+		                          parse_from_config=True, dest='modern_annotations_include_name',
 		                          help='Include plugin name in messages (enabled by default)')
-		option_manager.add_option('--postponed-annotations-no-include-name', default=None, action='store_false',
-		                          parse_from_config=False, dest='postponed_annotations_include_name',
+		option_manager.add_option('--modern-annotations-no-include-name', default=None, action='store_false',
+		                          parse_from_config=False, dest='modern_annotations_include_name',
 		                          help='Remove plugin name from messages')
 
 	@classmethod
 	def parse_options(cls, options: Options) -> None:
-		cls.plugin_name = (' (' + cls.name + ')') if (options.postponed_annotations_include_name) else ''
+		cls.plugin_name = (' (' + cls.name + ')') if (options.modern_annotations_include_name) else ''
 		if ((sys.version_info.major == 3) and (sys.version_info.minor < 7)):
-			cls.activation = 'never'
+			cls.postponed = 'never'
 		else:
-			cls.activation = options.postponed_annotations_activation
+			cls.postponed = options.modern_annotations_postponed
 
 	def _logical_token_message(self, token: tokenize.TokenInfo, message: Message, **kwargs) -> LogicalResult:
 		return (token.start, f'{message.code}{self.plugin_name} {message.text(**kwargs)}')
@@ -162,11 +162,11 @@ class AnnotationChecker(Checker):
 
 	def __init__(self, tree: ast.AST) -> None:
 		self.tree = tree
-		self.enabled = ('always' == self.activation)
+		self.enabled = ('always' == self.postponed)
 
 	def __iter__(self) -> Iterator[ASTResult]:
 		"""Primary call from flake8, yield error messages."""
-		if ((not self.enabled) and ('never' != self.activation)):
+		if ((not self.enabled) and ('never' != self.postponed)):
 			import_visitor = ImportVisitor()
 			import_visitor.visit(self.tree)
 			self.enabled = import_visitor.enabled

@@ -1,6 +1,6 @@
 """Define PyPI package."""
 
-import flake8_postponed_annotations
+import flake8_modern_annotations
 
 import setuptools
 
@@ -9,17 +9,17 @@ with open('README.md', 'r') as readme_file:
 	long_description = readme_file.read()
 
 setuptools.setup(
-	name='flake8-postponed-annotations',
+	name='flake8-modern-annotations',
 	version='1.999.999-dev',  # version will get replaced by git version tag - do not edit
 	author='Peter Linss',
 	author_email='pypi@linss.com',
-	description='Flake8 postponed annotations validation',
+	description='Flake8 modern annotations validation',
 	long_description=long_description,
 	long_description_content_type='text/markdown',
-	url='https://github.com/plinss/flake8-postponed-annotations/',
+	url='https://github.com/plinss/flake8-modern-annotations/',
 
-	packages=['flake8_postponed_annotations'],
-	package_data={'flake8_postponed_annotations': ['py.typed']},
+	packages=['flake8_modern_annotations'],
+	package_data={'flake8_modern_annotations': ['py.typed']},
 
 	install_requires=[
 		'flake8>=3.8.0,<6.0',
@@ -42,7 +42,7 @@ setuptools.setup(
 			'flake8-literal',
 			'flake8-noqa',
 			'flake8-polyfill',
-			'flake8-postponed-annotations',
+			'flake8-modern-annotations',
 			'flake8-requirements',
 			# 'flake8-smart-tabs',
 			'flake8-tabs',
@@ -69,7 +69,7 @@ setuptools.setup(
 	python_requires='>=3.7',
 	entry_points={
 		'flake8.extension': [
-			f'{flake8_postponed_annotations.plugin_prefix} = flake8_postponed_annotations.checker:AnnotationChecker',
+			f'{flake8_modern_annotations.plugin_prefix} = flake8_modern_annotations.checker:AnnotationChecker',
 		],
 	},
 )
