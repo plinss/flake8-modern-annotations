@@ -19,6 +19,7 @@ def flake8(test: str, options: List[str] = None) -> List[str]:
 	stdout, stderr = process.communicate()
 	os.remove(temp_file.name)
 	if (stderr):
+		print(stderr.decode('utf-8'))
 		return [f'0:0:{line}' for line in stderr.decode('utf-8').splitlines()]
 	# print(repr([line.split(':', 1)[1] for line in stdout.decode('utf-8').splitlines()]))
 	return [line.split(':', 1)[1] for line in stdout.decode('utf-8').splitlines()]
@@ -92,8 +93,90 @@ class TestAnnotations(unittest.TestCase):
 		])
 
 	def test_callable(self) -> None:
-		options = ['postponed=always']
+		options = ['postponed=always', 'deprecated=never']
 		self.assertEqual(flake8("from typing import Callable\ndef func(x: Callable[..., None]) -> None:\n    pass", options), [
+		])
+
+	def test_deprecated(self) -> None:
+		options = ['deprecated=always']
+		self.assertEqual(flake8("import typing\ndef func(x: typing.Dict[str, str]) -> None:\n    pass", options), [
+			"2:13: MDA202 Replace 'typing.Dict' with 'dict'",
+		])
+		self.assertEqual(flake8("import typing as typ\ndef func(x: typ.Dict[str, str]) -> None:\n    pass", options), [
+			"2:13: MDA202 Replace 'typ.Dict' with 'dict'",
+		])
+		self.assertEqual(flake8("from typing import Dict\ndef func(x: Dict[str, str]) -> None:\n    pass", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"2:13: MDA202 Replace 'Dict' with 'dict'",
+		])
+		self.assertEqual(flake8("from typing import Dict as TDict\ndef func(x: TDict[str, str]) -> None:\n    pass", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"2:13: MDA202 Replace 'TDict' with 'dict'",
+		])
+		self.assertEqual(flake8("import typing\ndef func(x: typing.Mapping[str, str]) -> typing.Mapping:\n    y: typing.Dict[str, str] = dict(x)\n    return y", options), [
+			"2:13: MDA234 Replace 'typing.Mapping' with 'collections.abc.Mapping'",
+			"2:42: MDA234 Replace 'typing.Mapping' with 'collections.abc.Mapping'",
+			"3:8: MDA202 Replace 'typing.Dict' with 'dict'",
+		])
+		self.assertEqual(flake8("from typing import Dict, Mapping\ndef func(x: Mapping[str, str]) -> Mapping:\n    y: Dict[str, str] = dict(x)\n    return y", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"1:1: MDA134 'typing.Mapping' is deprecated, replace with 'collections.abc.Mapping'",
+			"2:13: MDA234 Replace 'Mapping' with 'collections.abc.Mapping'",
+			"2:35: MDA234 Replace 'Mapping' with 'collections.abc.Mapping'",
+			"3:8: MDA202 Replace 'Dict' with 'dict'",
+		])
+		self.assertEqual(flake8("from typing import Dict as TDict\nx: TDict[str, str] = {}", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"2:4: MDA202 Replace 'TDict' with 'dict'",
+		])
+
+	def test_allowed_type_alias(self) -> None:
+		options = ['deprecated=always', 'type-alias=always']
+		self.assertEqual(flake8("import typing\nMyDict = typing.Dict[str, typing.List]", options), [
+		])
+		self.assertEqual(flake8("import typing as typ\nMyDict = typ.Dict[str, typ.List]", options), [
+		])
+		self.assertEqual(flake8("from typing import Dict, List\nMyDict = Dict[str, List]", options), [
+		])
+		self.assertEqual(flake8("from typing import Dict as TDict, List as TList\nMyDict = TDict[str, TList]", options), [
+		])
+
+	def test_required_type_alias(self) -> None:
+		options = ['deprecated=always', 'type-alias=always']
+		self.assertEqual(flake8("MyDict = dict[str, list]", options), [
+			"1:10: MDA302 Replace 'dict' with 'typing.Dict' for type alias",
+			"1:20: MDA301 Replace 'list' with 'typing.List' for type alias",
+		])
+		self.assertEqual(flake8("from collections.abc import Mapping, Sequence\nMyDict = Mapping[str, Sequence]", options), [
+			"2:10: MDA334 Replace 'Mapping' with 'typing.Mapping' for type alias",
+			"2:23: MDA336 Replace 'Sequence' with 'typing.Sequence' for type alias",
+		])
+		self.assertEqual(flake8("from re import Match as ReMatch, Pattern as RePattern\nMyMatch = ReMatch[RePattern]", options), [
+			"2:11: MDA361 Replace 'ReMatch' with 'typing.Match' for type alias",
+			"2:19: MDA360 Replace 'RePattern' with 'typing.Pattern' for type alias",
+		])
+
+	def test_no_type_alias(self) -> None:
+		options = ['deprecated=always', 'type-alias=never']
+		self.assertEqual(flake8("import typing\nMyDict = typing.Dict[str, typing.List]", options), [
+			"2:10: MDA202 Replace 'typing.Dict' with 'dict'",
+			"2:27: MDA201 Replace 'typing.List' with 'list'",
+		])
+		self.assertEqual(flake8("import typing as typ\nMyDict = typ.Dict[str, typ.List]", options), [
+			"2:10: MDA202 Replace 'typ.Dict' with 'dict'",
+			"2:24: MDA201 Replace 'typ.List' with 'list'",
+		])
+		self.assertEqual(flake8("from typing import Dict, List\nMyDict = Dict[str, List]", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"1:1: MDA101 'typing.List' is deprecated, remove from import",
+			"2:10: MDA202 Replace 'Dict' with 'dict'",
+			"2:20: MDA201 Replace 'List' with 'list'",
+		])
+		self.assertEqual(flake8("from typing import Dict as TDict, List as TList\nMyDict = TDict[str, TList]", options), [
+			"1:1: MDA102 'typing.Dict' is deprecated, remove from import",
+			"1:1: MDA101 'typing.List' is deprecated, remove from import",
+			"2:10: MDA202 Replace 'TDict' with 'dict'",
+			"2:21: MDA201 Replace 'TList' with 'list'",
 		])
 
 
