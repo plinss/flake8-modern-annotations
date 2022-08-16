@@ -314,6 +314,7 @@ TYPING_TYPES = {
 	'Set',
 	'Tuple',
 	'Type',
+	'TypeAlias',
 	'Union',
 	'ValuesView',
 }
@@ -371,6 +372,11 @@ RE_TYPES = {
 LITERALS = {
 	'typing.Literal',
 	'typing_extensions.Literal',
+}
+
+TYPE_ALIASES = {
+	'typing.TypeAlias',
+	'typing_extensions.TypeAlias',
 }
 
 DEPRECATED_TYPES = {
@@ -665,6 +671,14 @@ class AnnotationVisitor(ast.NodeVisitor):
 			self.union.extend(self._check_union(node.value))
 
 	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+		if (self.allow_type_alias):
+			name = self._name(node.annotation)
+			if (name):
+				type_name = self.type_map.get(name)
+				if (type_name in TYPE_ALIASES):
+					self._remove_import_violations(node.value)
+					self.required.extend(self._check_required(node.value))
+					return
 		self.postponed.extend(self._check_postponed(node.annotation, Message.POSTPONED_ASSIGN_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.annotation))
 		self.union.extend(self._check_union(node.annotation))
