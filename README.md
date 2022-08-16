@@ -4,6 +4,7 @@ flake8 plugin to validate type annotations accoring to modern practices.
 
 * Postponed Evaluations of Annotations per PEP 563.
 * Standard collection generics per PEP 585.
+* Union types as X | Y per PEP 604.
 
 ### Activation
 
@@ -35,6 +36,10 @@ choices: `auto`, `always`, `never` (default: `auto`)
 : Use deprecated types in type aliases (required for older Python < 3.9), 
 choices: `auto`, `always`, `never` (default: `auto`)
 
+`modern-annotations-union`
+: Controls checks for use of typing.Union (PEP 604), 
+choices: `auto`, `always`, `never` (default: `auto`)
+
 `modern-annotations-include-name`
 : Include plugin name in messages
 
@@ -55,15 +60,12 @@ use `modern-annotations-type-alias=always` to ensure that type aliases will work
 | MDA001 | Remove quotes from variable type annotation 'type'
 | MDA002 | Remove quotes from argument type annotation 'type'
 | MDA003 | Remove quotes from return type annotation 'type'
-
-
 | MDA100 | 'typing.Tuple' is deprecated, remove from import
 | MDA101 | 'typing.List' is deprecated, remove from import
 | MDA102 | 'typing.Dict' is deprecated, remove from import
 | MDA103 | 'typing.Set' is deprecated, remove from import
 | MDA104 | 'typing.FrozenSet' is deprecated, remove from import
 | MDA105 | 'typing.Type' is deprecated, remove from import
-
 | MDA110 | 'typing.Deque' is deprecated, replace with 'collections.deque'
 | MDA111 | 'typing.DefaultDict' is deprecated, replace with 'collections.defaultdict'
 | MDA112 | 'typing.OrderedDict' is deprecated, replace with 'collections.OrderedDict'
@@ -96,7 +98,6 @@ use `modern-annotations-type-alias=always` to ensure that type aliases will work
 | MDA151 | 'typing.AsyncContextManager' is deprecated, replace with 'contextlib.AbstractAsyncContextManager'
 | MDA160 | 'typing.Pattern' is deprecated, replace with 're.Pattern'
 | MDA161 | 'typing.Match' is deprecated, replace with 're.Match'
-
 | MDA200 | Replace 'Tuple' with 'tuple'
 | MDA201 | Replace 'List' with 'list'
 | MDA202 | Replace 'Dict' with 'dict'
@@ -135,6 +136,8 @@ use `modern-annotations-type-alias=always` to ensure that type aliases will work
 | MDA251 | Replace 'AsyncContextManager' with 'contextlib.AbstractAsyncContextManager'
 | MDA260 | Replace 'Pattern' with 're.Pattern'
 | MDA261 | Replace 'Match' with 're.Match'
+| MDA400 | 'typing.Union' is deprecated, remove from import
+| MDA401 | Replace 'Union' with |
 
 
 ## Examples
@@ -149,4 +152,7 @@ x: Dict[str, str]  <-- MDA202
 
 from typing import Dict
 MyDict = Dict[str, int]  <-- no error on Python 3.7/3.8
+
+from typing import Union  <-- MDA400
+x: Union[int, float]  <-- MDA401
 ```
