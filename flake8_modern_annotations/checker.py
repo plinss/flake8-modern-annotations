@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import enum
 import sys
-from typing import ClassVar, Dict, Optional, TYPE_CHECKING, Tuple, Type
+from typing import ClassVar, Dict, Optional, TYPE_CHECKING, Tuple, cast
 
 import flake8_modern_annotations
 
@@ -40,7 +40,7 @@ class Options(Protocol):
 
 LogicalResult = Tuple[Tuple[int, int], str]  # (line, column), text
 PhysicalResult = Tuple[int, str]  # (column, text)
-ASTResult = Tuple[int, int, str, Type]  # (line, column, text, Type)
+ASTResult = Tuple[int, int, str, type]  # (line, column, text, type)
 
 
 REMOVE_IMPORT = "'{name}' is deprecated, remove from import"
@@ -498,7 +498,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 		self.union_imports = {}
 		self.union = []
 
-	def _name(self, node: ast.AST) -> str:
+	def _name(self, node: (ast.AST | None)) -> str:
 		if (isinstance(node, ast.Subscript)):
 			return self._name(node.value)
 		if (isinstance(node, ast.Name)):
@@ -522,7 +522,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 		"""Find types used in type aliases, remove from deprecated_imports and union_imports."""
 		if (isinstance(node, ast.Subscript)):
 			name = self._name(node)
-			if (name in self.deprecated_imports):
+			if ((self.allow_type_alias) and (name in self.deprecated_imports)):
 				del self.deprecated_imports[name]
 			if (name in self.union_imports):
 				del self.union_imports[name]
@@ -613,21 +613,21 @@ class AnnotationVisitor(ast.NodeVisitor):
 			except AttributeError:
 				pass
 
-	def _check_deprecated(self, annotation: Optional[ast.AST]) -> Iterator[Violation]:
-		if (isinstance(annotation, (ast.Name, ast.Attribute, ast.Subscript))):
+	def _check_deprecated(self, annotation: Optional[ast.AST], type_alias: bool = False) -> Iterator[Violation]:
+		if (isinstance(annotation, (ast.Name, ast.Attribute) if (type_alias and self.allow_type_alias) else (ast.Name, ast.Attribute, ast.Subscript))):
 			name = self._name(annotation)
 			type_name = self.type_map.get(name)
 			if ((type_name in DEPRECATED_TYPES) or (type_name in REPLACED_TYPES)):
 				replacement, _, message = DEPRECATED_TYPES[type_name] if (type_name in DEPRECATED_TYPES) else REPLACED_TYPES[type_name]
-				yield (annotation, message, {'name': name, 'replacement': replacement})
+				yield (cast(ast.AST, annotation), message, {'name': name, 'replacement': replacement})
 
 		if (isinstance(annotation, ast.Subscript)):
 			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
-					yield from self._check_deprecated(item)
+					yield from self._check_deprecated(item, type_alias)
 			else:
-				yield from self._check_deprecated(value)
+				yield from self._check_deprecated(value, type_alias)
 
 	def _check_required(self, annotation: Optional[ast.AST]) -> Iterator[Violation]:
 		if (isinstance(annotation, ast.Subscript)):
@@ -660,22 +660,25 @@ class AnnotationVisitor(ast.NodeVisitor):
 				yield from self._check_union(value)
 
 	def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+		self._remove_import_violations(node.value)
+		self.deprecated.extend(self._check_deprecated(node.value, True))
 		if (self.allow_type_alias):
-			self._remove_import_violations(node.value)
 			self.required.extend(self._check_required(node.value))
-		else:
-			self.deprecated.extend(self._check_deprecated(node.value))
-			self.union.extend(self._check_union(node.value))
+		# else:
+			# self.union.extend(self._check_union(node.value))  # Union allowed in type alias value (need to check for forward refs)
 
 	def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
-		if (self.allow_type_alias):
-			name = self._name(node.annotation)
-			if (name):
-				type_name = self.type_map.get(name)
-				if (type_name in TYPE_ALIASES):
-					self._remove_import_violations(node.value)
+		name = self._name(node.annotation)
+		if (name):
+			type_name = self.type_map.get(name)
+			if (type_name in TYPE_ALIASES):
+				self._remove_import_violations(node.value)
+				self.deprecated.extend(self._check_deprecated(node.value, True))
+				if (self.allow_type_alias):
 					self.required.extend(self._check_required(node.value))
-					return
+				else:
+					self.postponed.extend(self._check_postponed(node.value, Message.POSTPONED_ASSIGN_TYPE))
+					# self.union.extend(self._check_union(node.value))  # Union allowed in type alias value (need to check for forward refs)
 		self.postponed.extend(self._check_postponed(node.annotation, Message.POSTPONED_ASSIGN_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.annotation))
 		self.union.extend(self._check_union(node.annotation))
