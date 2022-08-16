@@ -132,26 +132,26 @@ class TestAnnotations(unittest.TestCase):
 
 	def test_allowed_type_alias(self) -> None:
 		options = ['deprecated=always', 'type-alias=always']
-		self.assertEqual(flake8("import typing\nMyDict = typing.Dict[str, typing.List]", options), [
+		self.assertEqual(flake8("import typing\nMyDict = typing.Dict[str, typing.List[str]]", options), [
 		])
-		self.assertEqual(flake8("import typing as typ\nMyDict = typ.Dict[str, typ.List]", options), [
+		self.assertEqual(flake8("import typing as typ\nMyDict = typ.Dict[str, typ.List[str]]", options), [
 		])
-		self.assertEqual(flake8("from typing import Dict, List\nMyDict = Dict[str, List]", options), [
+		self.assertEqual(flake8("from typing import Dict, List\nMyDict = Dict[str, List[str]]", options), [
 		])
-		self.assertEqual(flake8("from typing import Dict as TDict, List as TList\nMyDict = TDict[str, TList]", options), [
+		self.assertEqual(flake8("from typing import Dict as TDict, List as TList\nMyDict = TDict[str, TList[str]]", options), [
 		])
 
 	def test_required_type_alias(self) -> None:
 		options = ['deprecated=always', 'type-alias=always']
-		self.assertEqual(flake8("MyDict = dict[str, list]", options), [
+		self.assertEqual(flake8("MyDict = dict[str, list[str]]", options), [
 			"1:10: MDA302 Replace 'dict' with 'typing.Dict' for type alias",
 			"1:20: MDA301 Replace 'list' with 'typing.List' for type alias",
 		])
-		self.assertEqual(flake8("from collections.abc import Mapping, Sequence\nMyDict = Mapping[str, Sequence]", options), [
+		self.assertEqual(flake8("from collections.abc import Mapping, Sequence\nMyDict = Mapping[str, Sequence[str]]", options), [
 			"2:10: MDA334 Replace 'Mapping' with 'typing.Mapping' for type alias",
 			"2:23: MDA336 Replace 'Sequence' with 'typing.Sequence' for type alias",
 		])
-		self.assertEqual(flake8("from re import Match as ReMatch, Pattern as RePattern\nMyMatch = ReMatch[RePattern]", options), [
+		self.assertEqual(flake8("from re import Match as ReMatch, Pattern as RePattern\nMyMatch = ReMatch[RePattern[str]]", options), [
 			"2:11: MDA361 Replace 'ReMatch' with 'typing.Match' for type alias",
 			"2:19: MDA360 Replace 'RePattern' with 'typing.Pattern' for type alias",
 		])

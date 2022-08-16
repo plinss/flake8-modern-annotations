@@ -520,14 +520,12 @@ class AnnotationVisitor(ast.NodeVisitor):
 
 	def _remove_import_violations(self, node: Optional[ast.AST]) -> None:
 		"""Find types used in type aliases, remove from deprecated_imports and union_imports."""
-		if (isinstance(node, (ast.Name, ast.Attribute, ast.Subscript))):
+		if (isinstance(node, ast.Subscript)):
 			name = self._name(node)
 			if (name in self.deprecated_imports):
 				del self.deprecated_imports[name]
 			if (name in self.union_imports):
 				del self.union_imports[name]
-
-		if (isinstance(node, ast.Subscript)):
 			value = node.slice.value if (isinstance(node.slice, ast.Index)) else node.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
@@ -632,14 +630,13 @@ class AnnotationVisitor(ast.NodeVisitor):
 				yield from self._check_deprecated(value)
 
 	def _check_required(self, annotation: Optional[ast.AST]) -> Iterator[Violation]:
-		if (isinstance(annotation, (ast.Name, ast.Attribute, ast.Subscript))):
+		if (isinstance(annotation, ast.Subscript)):
 			name = self._name(annotation)
 			type_name = self.type_map.get(name)
 			if (type_name in REQUIRED_TYPES):
 				replacement, message = REQUIRED_TYPES[type_name]
 				yield (annotation, message, {'name': name, 'replacement': replacement})
 
-		if (isinstance(annotation, ast.Subscript)):
 			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
