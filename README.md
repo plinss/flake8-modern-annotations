@@ -22,6 +22,25 @@ Standard python package installation:
     pip install flake8-modern-annotations
 
 
+## Type Aliases
+
+Note that there are some restrictions when using modern annotation proactices with type aliases:
+
+* Forward references
+  * Must use string literals
+  * Unions containing forward references must use `typing.Union`
+
+* Standard collection generics
+  * Cannot be used in type aliases if subscripted on Python < 3.9, e.g. `X: TypeAlias = dict[str, str]`
+
+* Unions
+  * `|` unions cannot be used in type aliases on Python < 3.9
+
+This plugin will not report errors for the above cases with the default settings.
+
+It is recommended to use the `TypeAlias` type for type aliases to help this plugin detect them properly in all cases.
+`TypeAlias` is available from `typing` in Python 3.10+ and `typing_extensions` in prior versions.
+
 ## Options
 
 `modern-annotations-postponed`
@@ -49,8 +68,13 @@ choices: `auto`, `always`, `never` (default: `auto`)
 All options may be specified on the command line with a `--` prefix,
 or can be placed in your flake8 config file.
 
+`auto` settings turn on or off depending on the version of Python that flake8 is running on,
+and the presence of `from __future__ import annotations` in the code, 
+which enables the modern annotations in Python 3.7+.
+
 If developing code in Python 3.9+ that is expected to run on 3.7 or 3.8,
-use `modern-annotations-type-alias=always` to ensure that type aliases will work.
+use `modern-annotations-type-alias=always` to force older behavior of type aliases
+and ensure that the code will work.
 
 
 ## Error Codes
