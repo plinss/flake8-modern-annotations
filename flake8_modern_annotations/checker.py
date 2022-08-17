@@ -586,9 +586,9 @@ class AnnotationVisitor(ast.NodeVisitor):
 				if (alias.name in RE_TYPES):
 					self.type_map[alias.asname or alias.name] = f're.{alias.name}'
 
-	def _check_postponed(self, annotation: Optional[ast.AST], message: Message) -> Iterator[Violation]:
+	def _check_postponed(self, annotation: Optional[ast.AST], message: Message, type_alias: bool = False) -> Iterator[Violation]:
 		if (isinstance(annotation, ast.Constant)):
-			if ((annotation.value is None) or isinstance(annotation.value, type(Ellipsis))):
+			if (type_alias or (annotation.value is None) or isinstance(annotation.value, type(Ellipsis))):
 				return
 			yield (annotation, message, {'value': annotation.value})
 		elif (isinstance(annotation, ast.Subscript)):
@@ -601,9 +601,9 @@ class AnnotationVisitor(ast.NodeVisitor):
 			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
-					yield from self._check_postponed(item, message)
+					yield from self._check_postponed(item, message, type_alias)
 			else:
-				yield from self._check_postponed(value, message)
+				yield from self._check_postponed(value, message, type_alias)
 		else:
 			try:
 				if (isinstance(annotation, ast.Str)):  # python3.7
@@ -677,7 +677,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				if (self.allow_type_alias):
 					self.required.extend(self._check_required(node.value))
 				else:
-					self.postponed.extend(self._check_postponed(node.value, Message.POSTPONED_ASSIGN_TYPE))
+					self.postponed.extend(self._check_postponed(node.value, Message.POSTPONED_ASSIGN_TYPE, True))
 					# self.union.extend(self._check_union(node.value))  # Union allowed in type alias value (need to check for forward refs)
 		self.postponed.extend(self._check_postponed(node.annotation, Message.POSTPONED_ASSIGN_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.annotation))
