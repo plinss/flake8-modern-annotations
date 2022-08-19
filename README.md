@@ -5,6 +5,7 @@ flake8 plugin to validate type annotations accoring to modern practices.
 * Postponed Evaluations of Annotations per PEP 563.
 * Standard collection generics per PEP 585.
 * Union types as X | Y per PEP 604.
+* Optional types when PEP 604 Unions are available.
 
 ### Activation
 
@@ -57,6 +58,10 @@ choices: `auto`, `always`, `never` (default: `auto`)
 
 `modern-annotations-union`
 : Controls checks for use of typing.Union (PEP 604), 
+choices: `auto`, `always`, `never` (default: `auto`)
+
+`modern-annotations-optional`
+: Controls checks for use of typing.Optional, 
 choices: `auto`, `always`, `never` (default: `auto`)
 
 `modern-annotations-include-name`
@@ -161,7 +166,9 @@ and ensure that the code will work.
 | MDA260 | Replace 'Pattern' with 're.Pattern'
 | MDA261 | Replace 'Match' with 're.Match'
 | MDA400 | 'typing.Union' is deprecated, remove from import
-| MDA401 | Replace 'Union' with |
+| MDA401 | Replace 'Union' with '&#x7c;'
+| MDA500 | 'typing.Optional' is deprecated, remove from import
+| MDA501 | Replace 'Optional' with '&#x7c; None'
 
 
 ## Examples
@@ -179,4 +186,7 @@ MyDict = Dict[str, int]  <-- no error on Python 3.7/3.8
 
 from typing import Union  <-- MDA400
 x: Union[int, float]  <-- MDA401
+
+from typing import Optional  <-- MDA500
+x: Optional[int]  <-- MDA501
 ```

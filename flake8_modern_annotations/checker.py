@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import enum
 import sys
-from typing import ClassVar, Dict, Optional, TYPE_CHECKING, Tuple, cast
+from typing import ClassVar, Dict, TYPE_CHECKING, Tuple, cast
 
 import flake8_modern_annotations
 
@@ -27,6 +27,21 @@ except Exception:
 	package_version = 'unknown'
 
 
+class ActiveOption(enum.Enum):
+	"""Values for activation options."""
+
+	AUTO = 'auto'
+	ALWAYS = 'always'
+	NEVER = 'never'
+
+	@classmethod
+	def from_str(cls, value: str) -> ActiveOption:
+		for member in cls.__members__.values():
+			if (value == member.value):
+				return member
+		return ActiveOption.AUTO
+
+
 class Options(Protocol):
 	"""Protocol for options."""
 
@@ -34,7 +49,7 @@ class Options(Protocol):
 	modern_annotations_deprecated: str
 	modern_annotations_type_alias: str
 	modern_annotations_union: str
-	modern_annotations_union_paren: str
+	modern_annotations_optional: str
 	modern_annotations_include_name: bool
 
 
@@ -175,7 +190,10 @@ class Message(enum.Enum):
 	REQUIRED_TYPE_MATCH = (361, REQUIRE_TYPE)
 
 	UNION_IMPORT = (400, REMOVE_IMPORT)
-	UNION_TYPE = (401, "Replace '{name}' with |")
+	UNION_TYPE = (401, "Replace '{name}' with '|'")
+
+	OPTIONAL_IMPORT = (500, "Replace '{name}' with '| None'")
+	OPTIONAL_TYPE = (501, "Replace '{name}' with '| None'")
 
 	@property
 	def code(self) -> str:
@@ -191,11 +209,11 @@ class Checker:
 	name: ClassVar[str] = __package__.replace('_', '-')
 	version: ClassVar[str] = package_version
 	plugin_name: ClassVar[str]
-	postponed_option: ClassVar[str] = 'auto'
-	deprecated_option: ClassVar[str] = 'auto'
-	type_alias_option: ClassVar[str] = 'auto'
-	union_option: ClassVar[str] = 'auto'
-	union_paren_option: ClassVar[str] = 'bare'
+	postponed_option: ClassVar[ActiveOption] = ActiveOption.AUTO
+	deprecated_option: ClassVar[ActiveOption] = ActiveOption.AUTO
+	type_alias_option: ClassVar[ActiveOption] = ActiveOption.AUTO
+	union_option: ClassVar[ActiveOption] = ActiveOption.AUTO
+	optional_option: ClassVar[ActiveOption] = ActiveOption.AUTO
 
 	@classmethod
 	def add_options(cls, option_manager: OptionManager) -> None:
@@ -215,10 +233,10 @@ class Checker:
 		                          action='store', parse_from_config=True,
 		                          choices=('auto', 'always', 'never'), dest='modern_annotations_union',
 		                          help="Check for Union type, auto checks for 'from __future__ import annotations' (default: auto)")
-		option_manager.add_option('--modern-annotations-union-paren', default='auto',
+		option_manager.add_option('--modern-annotations-optional', default='auto',
 		                          action='store', parse_from_config=True,
-		                          choices=('bare', 'always', 'never'), dest='modern_annotations_union_paren',
-		                          help="Use ()'s for | unions, bare requires when not in [] (default: bare)")
+		                          choices=('auto', 'always', 'never'), dest='modern_annotations_optional',
+		                          help='Check for Optional type, auto activates when union is active (default: auto)')
 
 		option_manager.add_option('--modern-annotations-include-name', default=False, action='store_true',
 		                          parse_from_config=True, dest='modern_annotations_include_name',
@@ -231,17 +249,17 @@ class Checker:
 	def parse_options(cls, options: Options) -> None:
 		cls.plugin_name = (' (' + cls.name + ')') if (options.modern_annotations_include_name) else ''
 		if (sys.version_info < (3, 7)):
-			cls.postponed_option = 'never'
-			cls.deprecated_option = 'never'
-			cls.type_alias_option = 'never'
-			cls.union_option = 'never'
-			cls.union_paren_option = 'never'
+			cls.postponed_option = ActiveOption.NEVER
+			cls.deprecated_option = ActiveOption.NEVER
+			cls.type_alias_option = ActiveOption.NEVER
+			cls.union_option = ActiveOption.NEVER
+			cls.optional_option = ActiveOption.NEVER
 		else:
-			cls.postponed_option = options.modern_annotations_postponed
-			cls.deprecated_option = options.modern_annotations_deprecated
-			cls.type_alias_option = options.modern_annotations_type_alias
-			cls.union_option = options.modern_annotations_union
-			cls.union_paren_option = options.modern_annotations_union_paren
+			cls.postponed_option = ActiveOption.from_str(options.modern_annotations_postponed)
+			cls.deprecated_option = ActiveOption.from_str(options.modern_annotations_deprecated)
+			cls.type_alias_option = ActiveOption.from_str(options.modern_annotations_type_alias)
+			cls.union_option = ActiveOption.from_str(options.modern_annotations_union)
+			cls.optional_option = ActiveOption.from_str(options.modern_annotations_optional)
 
 	def _logical_token_message(self, token: tokenize.TokenInfo, message: Message, **kwargs) -> LogicalResult:
 		return (token.start, f'{message.code}{self.plugin_name} {message.text(**kwargs)}')
@@ -308,6 +326,7 @@ TYPING_TYPES = {
 	'MutableSequence',
 	'MutableSet',
 	'OrderedDict',
+	'Optional',
 	'Pattern',
 	'Reversible',
 	'Sequence',
@@ -471,7 +490,6 @@ class AnnotationVisitor(ast.NodeVisitor):
 	"""Annotation visitor."""
 
 	allow_type_alias: bool
-	union_paren: str
 	type_map: dict[str, str]
 	postponed: list[Violation]
 	deprecated_imports: dict[str, list[Violation]]
@@ -479,10 +497,11 @@ class AnnotationVisitor(ast.NodeVisitor):
 	required: list[Violation]
 	union_imports: dict[str, list[Violation]]
 	union: list[Violation]
+	optional_imports: dict[str, list[Violation]]
+	optional: list[Violation]
 
-	def __init__(self, allow_type_alias: bool, union_paren: str) -> None:
+	def __init__(self, allow_type_alias: bool) -> None:
 		self.allow_type_alias = allow_type_alias
-		self.union_paren = union_paren
 		self.type_map = {
 			'tuple': 'tuple',
 			'list': 'list',
@@ -497,6 +516,8 @@ class AnnotationVisitor(ast.NodeVisitor):
 		self.required = []
 		self.union_imports = {}
 		self.union = []
+		self.optional_imports = {}
+		self.optional = []
 
 	def _name(self, node: (ast.AST | None)) -> str:
 		if (isinstance(node, ast.Subscript)):
@@ -518,14 +539,21 @@ class AnnotationVisitor(ast.NodeVisitor):
 			self.union_imports[alias_name] = []
 		self.union_imports[alias_name].append((node, Message.UNION_IMPORT, {'name': type_name}))
 
-	def _remove_import_violations(self, node: Optional[ast.AST]) -> None:
-		"""Find types used in type aliases, remove from deprecated_imports and union_imports."""
+	def _add_optional_import(self, node: ast.ImportFrom, type_name: str, alias_name: str) -> None:
+		if (alias_name not in self.optional_imports):
+			self.optional_imports[alias_name] = []
+		self.optional_imports[alias_name].append((node, Message.UNION_IMPORT, {'name': type_name}))
+
+	def _remove_import_violations(self, node: (ast.AST | None)) -> None:
+		"""Find types used in type aliases, remove from deprecated_imports, union_imports, and optional_imports."""
 		if (isinstance(node, ast.Subscript)):
 			name = self._name(node)
 			if ((self.allow_type_alias) and (name in self.deprecated_imports)):
 				del self.deprecated_imports[name]
 			if (name in self.union_imports):
 				del self.union_imports[name]
+			if (name in self.optional_imports):
+				del self.optional_imports[name]
 			value = node.slice.value if (isinstance(node.slice, ast.Index)) else node.slice
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
@@ -565,6 +593,8 @@ class AnnotationVisitor(ast.NodeVisitor):
 					self._add_deprecated_import(node, type_name, alias_name)
 				elif ('typing.Union' == type_name):
 					self._add_union_import(node, type_name, alias_name)
+				elif ('typing.Optional' == type_name):
+					self._add_optional_import(node, type_name, alias_name)
 		elif ('typing_extensions' == node.module):
 			for alias in node.names:
 				if (alias.name in TYPING_EXTENSION_TYPES):
@@ -586,7 +616,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				if (alias.name in RE_TYPES):
 					self.type_map[alias.asname or alias.name] = f're.{alias.name}'
 
-	def _check_postponed(self, annotation: Optional[ast.AST], message: Message, type_alias: bool = False) -> Iterator[Violation]:
+	def _check_postponed(self, annotation: (ast.AST | None), message: Message, type_alias: bool = False) -> Iterator[Violation]:
 		if (isinstance(annotation, ast.Constant)):
 			if (type_alias or (annotation.value is None) or isinstance(annotation.value, type(Ellipsis))):
 				return
@@ -613,7 +643,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 			except AttributeError:
 				pass
 
-	def _check_deprecated(self, annotation: Optional[ast.AST], type_alias: bool = False) -> Iterator[Violation]:
+	def _check_deprecated(self, annotation: (ast.AST | None), type_alias: bool = False) -> Iterator[Violation]:
 		if (isinstance(annotation, (ast.Name, ast.Attribute) if (type_alias and self.allow_type_alias) else (ast.Name, ast.Attribute, ast.Subscript))):
 			name = self._name(annotation)
 			type_name = self.type_map.get(name)
@@ -629,7 +659,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 			else:
 				yield from self._check_deprecated(value, type_alias)
 
-	def _check_required(self, annotation: Optional[ast.AST]) -> Iterator[Violation]:
+	def _check_required(self, annotation: (ast.AST | None)) -> Iterator[Violation]:
 		if (isinstance(annotation, ast.Subscript)):
 			name = self._name(annotation)
 			type_name = self.type_map.get(name)
@@ -644,7 +674,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 			else:
 				yield from self._check_required(value)
 
-	def _check_union(self, annotation: Optional[ast.AST]) -> Iterator[Violation]:
+	def _check_union(self, annotation: (ast.AST | None)) -> Iterator[Violation]:
 		if (isinstance(annotation, (ast.Name, ast.Attribute, ast.Subscript))):
 			name = self._name(annotation)
 			type_name = self.type_map.get(name)
@@ -658,6 +688,21 @@ class AnnotationVisitor(ast.NodeVisitor):
 					yield from self._check_union(item)
 			else:
 				yield from self._check_union(value)
+
+	def _check_optional(self, annotation: (ast.AST | None)) -> Iterator[Violation]:
+		if (isinstance(annotation, (ast.Name, ast.Attribute, ast.Subscript))):
+			name = self._name(annotation)
+			type_name = self.type_map.get(name)
+			if ('typing.Optional' == type_name):
+				yield (annotation, Message.OPTIONAL_TYPE, {'name': name})
+
+		if (isinstance(annotation, ast.Subscript)):
+			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			if (isinstance(value, ast.Tuple)):
+				for item in value.elts:
+					yield from self._check_optional(item)
+			else:
+				yield from self._check_optional(value)
 
 	def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
 		self._remove_import_violations(node.value)
@@ -682,17 +727,20 @@ class AnnotationVisitor(ast.NodeVisitor):
 		self.postponed.extend(self._check_postponed(node.annotation, Message.POSTPONED_ASSIGN_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.annotation))
 		self.union.extend(self._check_union(node.annotation))
+		self.optional.extend(self._check_optional(node.annotation))
 
 	def visit_arg(self, node: ast.arg) -> None:
 		self.postponed.extend(self._check_postponed(node.annotation, Message.POSTPONED_ARG_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.annotation))
 		self.union.extend(self._check_union(node.annotation))
+		self.optional.extend(self._check_optional(node.annotation))
 
 	def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
 		self.generic_visit(node)
 		self.postponed.extend(self._check_postponed(node.returns, Message.POSTPONED_RETURN_TYPE))
 		self.deprecated.extend(self._check_deprecated(node.returns))
 		self.union.extend(self._check_union(node.returns))
+		self.optional.extend(self._check_optional(node.returns))
 
 
 class AnnotationChecker(Checker):
@@ -703,35 +751,40 @@ class AnnotationChecker(Checker):
 	deprecated: bool
 	type_alias: bool
 	union: bool
+	optional: bool
 
 	def __init__(self, tree: ast.AST) -> None:
 		self.tree = tree
-		self.postponed = ('always' == self.postponed_option)
-		self.deprecated = ('always' == self.deprecated_option)
-		self.type_alias = ('always' == self.type_alias_option)
-		self.union = ('always' == self.union_option)
+		self.postponed = (ActiveOption.ALWAYS == self.postponed_option)
+		self.deprecated = (ActiveOption.ALWAYS == self.deprecated_option)
+		self.type_alias = (ActiveOption.ALWAYS == self.type_alias_option)
+		self.union = (ActiveOption.ALWAYS == self.union_option)
+		self.optional = (ActiveOption.ALWAYS == self.optional_option)
 
 	def __iter__(self) -> Iterator[ASTResult]:
 		"""Primary call from flake8, yield error messages."""
 		future_visitor = FutureVisitor()
 		future_visitor.visit(self.tree)
 
-		if ((not self.postponed) and ('never' != self.postponed_option)):
+		if ((not self.postponed) and (ActiveOption.NEVER != self.postponed_option)):
 			self.postponed = future_visitor.enabled
 
-		if ((not self.deprecated) and ('never' != self.deprecated_option)):
+		if ((not self.deprecated) and (ActiveOption.NEVER != self.deprecated_option)):
 			self.deprecated = (future_visitor.enabled or (sys.version_info >= (3, 9)))
 
-		if ((not self.type_alias) and ('never' != self.type_alias_option)):
+		if ((not self.type_alias) and (ActiveOption.NEVER != self.type_alias_option)):
 			self.type_alias = (sys.version_info < (3, 9))
 
-		if ((not self.type_alias) and ('never' != self.type_alias_option)):
+		if ((not self.type_alias) and (ActiveOption.NEVER != self.type_alias_option)):
 			self.type_alias = (sys.version_info < (3, 9))
 
-		if ((not self.union) and ('never' != self.union_option)):
+		if ((not self.union) and (ActiveOption.NEVER != self.union_option)):
 			self.union = (future_visitor.enabled or (sys.version_info >= (3, 10)))
 
-		annotation_visitor = AnnotationVisitor(self.type_alias, self.union_paren_option)
+		if ((not self.optional) and (ActiveOption.NEVER != self.optional_option)):
+			self.optional = self.union
+
+		annotation_visitor = AnnotationVisitor(self.type_alias)
 		annotation_visitor.visit(self.tree)
 
 		if (self.postponed):
@@ -752,4 +805,11 @@ class AnnotationChecker(Checker):
 				for node, message, kwargs in violations:
 					yield self._ast_node_message(node, message, **kwargs)
 			for node, message, kwargs in annotation_visitor.union:
+				yield self._ast_node_message(node, message, **kwargs)
+
+		if (self.optional):
+			for violations in annotation_visitor.optional_imports.values():
+				for node, message, kwargs in violations:
+					yield self._ast_node_message(node, message, **kwargs)
+			for node, message, kwargs in annotation_visitor.optional:
 				yield self._ast_node_message(node, message, **kwargs)
