@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import enum
 import sys
-from typing import ClassVar, Dict, TYPE_CHECKING, Tuple, cast
+from typing import Any, ClassVar, Dict, TYPE_CHECKING, Tuple, cast
 
 import flake8_modern_annotations
 
@@ -528,6 +528,9 @@ class AnnotationVisitor(ast.NodeVisitor):
 			return f'{self._name(node.value)}.{node.attr}'
 		return ''
 
+	def _subscript_value(self, node: ast.Subscript) -> ast.AST:
+		return cast(Any, node.slice).value if (isinstance(node.slice, ast.Index)) else node.slice
+
 	def _add_deprecated_import(self, node: ast.ImportFrom, type_name: str, alias_name: str) -> None:
 		if (alias_name not in self.deprecated_imports):
 			self.deprecated_imports[alias_name] = []
@@ -554,7 +557,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				del self.union_imports[name]
 			if (name in self.optional_imports):
 				del self.optional_imports[name]
-			value = node.slice.value if (isinstance(node.slice, ast.Index)) else node.slice
+			value = self._subscript_value(node)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					self._remove_import_violations(item)
@@ -628,7 +631,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				if (type_name in LITERALS):
 					return
 
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			value = self._subscript_value(annotation)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_postponed(item, message, type_alias)
@@ -652,7 +655,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				yield (cast(ast.AST, annotation), message, {'name': name, 'replacement': replacement})
 
 		if (isinstance(annotation, ast.Subscript)):
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			value = self._subscript_value(annotation)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_deprecated(item, type_alias)
@@ -667,7 +670,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				replacement, message = REQUIRED_TYPES[type_name]
 				yield (annotation, message, {'name': name, 'replacement': replacement})
 
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			value = self._subscript_value(annotation)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_required(item)
@@ -682,7 +685,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				yield (annotation, Message.UNION_TYPE, {'name': name})
 
 		if (isinstance(annotation, ast.Subscript)):
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			value = self._subscript_value(annotation)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_union(item)
@@ -697,7 +700,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 				yield (annotation, Message.OPTIONAL_TYPE, {'name': name})
 
 		if (isinstance(annotation, ast.Subscript)):
-			value = annotation.slice.value if (isinstance(annotation.slice, ast.Index)) else annotation.slice
+			value = self._subscript_value(annotation)
 			if (isinstance(value, ast.Tuple)):
 				for item in value.elts:
 					yield from self._check_optional(item)
